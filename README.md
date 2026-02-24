@@ -61,6 +61,49 @@ pio run -t uploadfs
 # Or use the specific environment for your board
 pio run -e esp32s3-supermini -t uploadfs  # For ESP32-S3 Supermini
 pio run -e esp32s3-xiao -t uploadfs       # For XIAO ESP32S3
+pio run -e nodemcu-esp32-wroom32 -t uploadfs  # For NodeMCU ESP32 WROOM-32
+```
+
+### NodeMCU ESP32 WROOM-32 Verdrahtung (S3 → WROOM-32)
+
+| Funktion | Bisher (ESP32-S3 Build) | Neu (NodeMCU ESP32 WROOM-32) |
+| --- | --- | --- |
+| HX711 Data (DT) | GPIO5 | GPIO34 |
+| HX711 Clock (SCK) | GPIO6 | GPIO25 |
+| Touch Tare | GPIO4 | GPIO33 |
+| Touch Sleep/Wake | GPIO3 | GPIO32 |
+| Battery ADC | GPIO7 | GPIO35 |
+| OLED I2C SDA | GPIO8 | GPIO21 |
+| OLED I2C SCL | GPIO9 | GPIO22 |
+
+**Wichtige Hinweise für WROOM-32:**
+- GPIO34 und GPIO35 sind input-only (ideal für HX711-DT und Battery-ADC, nicht als Ausgang verwenden).
+- Sleep/Wake liegt auf GPIO32, damit Deep-Sleep-Wakeup über RTC-fähigen Pin funktioniert.
+- Bei Touch-Modulen mit digitalem Ausgang muss der Ausgang auf HIGH gehen, wenn berührt.
+
+**Schnelles Anschlussbild (Breadboard / MVP):**
+
+```text
+NodeMCU ESP32 WROOM-32          Modul
+-------------------------------------------------
+3V3  --------------------------> HX711 VCC
+GND  --------------------------> HX711 GND
+GPIO34 ------------------------> HX711 DT
+GPIO25 ------------------------> HX711 SCK
+
+3V3  --------------------------> OLED VCC
+GND  --------------------------> OLED GND
+GPIO21 ------------------------> OLED SDA
+GPIO22 ------------------------> OLED SCL
+
+GPIO33 <----------------------- Touch Tare OUT
+GPIO32 <----------------------- Touch Sleep OUT
+3V3  --------------------------> Touch VCC
+GND  --------------------------> Touch GND
+
+GPIO35 <----------------------- Battery Divider OUT (1/2 VBAT)
+GND  --------------------------> Divider GND
+VBAT --------------------------> Divider IN
 ```
 
 **Without the filesystem upload:**
