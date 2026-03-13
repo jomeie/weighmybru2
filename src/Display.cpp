@@ -954,7 +954,7 @@ void Display::updateSecondaryDisplay() {
     }
 
     int timerX = 0;
-    int timerY = 5;
+    int timerY = 0;
     if (absTimer >= 60.0f) {
         int totalSeconds = (int)absTimer;
         int minutes = totalSeconds / 60;
@@ -1001,7 +1001,7 @@ void Display::updateSecondaryDisplay() {
         secondaryDisplay->print(String(timerDecimal));
     }
 
-    int flowY = 5;
+    int flowY = 0;
     uint16_t flowIntWidth, dotWidth, flowDecWidth;
     secondaryDisplay->setTextSize(3);
     secondaryDisplay->getTextBounds(flowIntStr, 0, 0, &x1, &y1, &flowIntWidth, &h);
@@ -1026,6 +1026,37 @@ void Display::updateSecondaryDisplay() {
     secondaryDisplay->setTextSize(2);
     secondaryDisplay->setCursor(flowX, flowY + 3);
     secondaryDisplay->print(String(flowDecimal));
+
+    const int barY = 26;
+    const int barHeight = 6;
+    const int barInnerWidth = SCREEN_WIDTH - 2;
+    const int barInnerHeight = barHeight - 2;
+
+    float flowBarValue = displayFlowRate;
+    if (flowBarValue < 0.0f) {
+        flowBarValue = 0.0f;
+    }
+    if (flowBarValue > 20.0f) {
+        flowBarValue = 20.0f;
+    }
+
+    int barFillWidth = (int)((flowBarValue / 20.0f) * barInnerWidth + 0.5f);
+
+    secondaryDisplay->drawRect(0, barY, SCREEN_WIDTH, barHeight, SSD1306_WHITE);
+    if (barFillWidth > 0) {
+        secondaryDisplay->fillRect(1, barY + 1, barFillWidth, barInnerHeight, SSD1306_WHITE);
+    }
+
+    // Flow markers at 5-unit steps (5, 10, 15) within the 0..20 bar
+    for (int markerValue = 5; markerValue < 20; markerValue += 5) {
+        int markerX = 1 + (int)((markerValue / 20.0f) * barInnerWidth + 0.5f);
+        secondaryDisplay->drawFastVLine(markerX, barY, barHeight, SSD1306_WHITE);
+
+        // Keep marker visible even on filled (white) area
+        if (barFillWidth >= markerX) {
+            secondaryDisplay->drawFastVLine(markerX, barY + 1, barInnerHeight, SSD1306_BLACK);
+        }
+    }
 
     secondaryDisplay->display();
 }
