@@ -91,7 +91,7 @@ void setup() {
   } else {
     Serial.println("Display initialized - ready for visual feedback");
     // Set reduced brightness for power optimization
-    oledDisplay.setBrightness(128);  // 50% brightness vs 255 max
+    oledDisplay.setBrightness(255);  // 50% brightness vs 255 max
     Serial.println("Display brightness set to 50% for power optimization");
   }
   

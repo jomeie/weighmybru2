@@ -110,6 +110,8 @@ void Display::setupDisplay() {
     
     display->clearDisplay();
     display->setTextColor(SSD1306_WHITE);
+    // Rotate display 180 degrees for inverted mounting
+    display->setRotation(2);
     display->cp437(true); // Use full 256 char 'Code Page 437' font
 }
 
