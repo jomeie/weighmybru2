@@ -844,6 +844,16 @@ void Display::showWeightWithFlowAndTimer(float weight) {
     // Declare variables used throughout function
     int16_t x1, y1;
     uint16_t w, h;
+
+    float currentFlowRate = 0.0;
+    if (flowRatePtr != nullptr) {
+        currentFlowRate = flowRatePtr->getFlowRate();
+    }
+
+    float displayFlowRate = currentFlowRate;
+    if (currentFlowRate >= -0.1 && currentFlowRate <= 0.1) {
+        displayFlowRate = 0.0;
+    }
     
     display->clearDisplay();
     
@@ -867,7 +877,7 @@ void Display::showWeightWithFlowAndTimer(float weight) {
     
     // Draw weight with custom decimal point - positioned at left middle
     display->setTextSize(3);
-    int weightY = 5; // Middle of 32-pixel screen (size 3 text is ~21px tall, so (32-21)/2 ≈ 5)
+    int weightY = 0;
     display->setCursor(0, weightY);
     
     // Draw negative sign if needed
@@ -899,6 +909,36 @@ void Display::showWeightWithFlowAndTimer(float weight) {
     display->setTextSize(2);
     display->setCursor(currentX, weightY + 3); // Positioned relative to weight baseline
     display->print(String(decimalPart));
+
+    const int barY = 26;
+    const int barHeight = 6;
+    const int barInnerWidth = SCREEN_WIDTH - 2;
+    const int barInnerHeight = barHeight - 2;
+
+    float flowBarValue = displayFlowRate;
+    if (flowBarValue < 10.0f) {
+        flowBarValue = 10.0f;
+    }
+    if (flowBarValue > 20.0f) {
+        flowBarValue = 20.0f;
+    }
+
+    int barFillWidth = (int)(((flowBarValue - 10.0f) / 10.0f) * barInnerWidth + 0.5f);
+
+    display->drawRect(0, barY, SCREEN_WIDTH, barHeight, SSD1306_WHITE);
+    if (barFillWidth > 0) {
+        display->fillRect(1, barY + 1, barFillWidth, barInnerHeight, SSD1306_WHITE);
+    }
+
+    // Flow markers for the 10..20 range at 2-unit steps (12, 14, 16, 18)
+    for (int markerValue = 12; markerValue < 20; markerValue += 2) {
+        int markerX = 1 + (int)((((float)markerValue - 10.0f) / 10.0f) * barInnerWidth + 0.5f);
+        display->drawFastVLine(markerX, barY, barHeight, SSD1306_WHITE);
+
+        if (barFillWidth >= markerX) {
+            display->drawFastVLine(markerX, barY + 1, barInnerHeight, SSD1306_BLACK);
+        }
+    }
     
     display->display();
 }
@@ -1036,20 +1076,20 @@ void Display::updateSecondaryDisplay() {
     if (flowBarValue < 0.0f) {
         flowBarValue = 0.0f;
     }
-    if (flowBarValue > 20.0f) {
-        flowBarValue = 20.0f;
+    if (flowBarValue > 10.0f) {
+        flowBarValue = 10.0f;
     }
 
-    int barFillWidth = (int)((flowBarValue / 20.0f) * barInnerWidth + 0.5f);
+    int barFillWidth = (int)((flowBarValue / 10.0f) * barInnerWidth + 0.5f);
 
     secondaryDisplay->drawRect(0, barY, SCREEN_WIDTH, barHeight, SSD1306_WHITE);
     if (barFillWidth > 0) {
         secondaryDisplay->fillRect(1, barY + 1, barFillWidth, barInnerHeight, SSD1306_WHITE);
     }
 
-    // Flow markers at 5-unit steps (5, 10, 15) within the 0..20 bar
-    for (int markerValue = 5; markerValue < 20; markerValue += 5) {
-        int markerX = 1 + (int)((markerValue / 20.0f) * barInnerWidth + 0.5f);
+    // Flow markers for the 0..10 range at 2-unit steps (2, 4, 6, 8)
+    for (int markerValue = 2; markerValue < 10; markerValue += 2) {
+        int markerX = 1 + (int)((markerValue / 10.0f) * barInnerWidth + 0.5f);
         secondaryDisplay->drawFastVLine(markerX, barY, barHeight, SSD1306_WHITE);
 
         // Keep marker visible even on filled (white) area
