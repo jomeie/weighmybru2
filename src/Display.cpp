@@ -6,13 +6,16 @@
 #include "BatteryMonitor.h"
 #include <WiFi.h>
 #include "WiFiManager.h"
+#include "BoardConfig.h"
 
 Display::Display(uint8_t sdaPin, uint8_t sclPin, Scale* scale, FlowRate* flowRate)
-    : sdaPin(sdaPin), sclPin(sclPin), scalePtr(scale), flowRatePtr(flowRate), bluetoothPtr(nullptr), powerManagerPtr(nullptr), batteryPtr(nullptr), wifiManagerPtr(nullptr),
+        : sdaPin(sdaPin), sclPin(sclPin), scalePtr(scale), flowRatePtr(flowRate), bluetoothPtr(nullptr), powerManagerPtr(nullptr), batteryPtr(nullptr), wifiManagerPtr(nullptr), secondaryWire(1),
       messageStartTime(0), messageDuration(2000), showingMessage(false), 
       timerStartTime(0), timerPausedTime(0), timerRunning(false), timerPaused(false),
       lastFlowRate(0.0), showingStatusPage(false), statusPageStartTime(0) {
     display = new Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+        secondaryDisplay = nullptr;
+        secondaryDisplayConnected = false;
 }
 
 bool Display::begin() {
@@ -98,6 +101,24 @@ bool Display::begin() {
     display->display();
     
     Serial.println("SSD1306 display initialized on SDA:" + String(sdaPin) + " SCL:" + String(sclPin));
+
+#ifdef BOARD_TYPE_XIAO
+    Serial.println("Initializing secondary display on separate I2C bus...");
+    secondaryWire.begin(I2C2_SDA_PIN, I2C2_SCL_PIN);
+    secondaryDisplay = new Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &secondaryWire, OLED_RESET);
+
+    secondaryWire.beginTransmission(SECONDARY_SCREEN_ADDRESS);
+    bool secondaryResponding = (secondaryWire.endTransmission() == 0);
+
+    if (secondaryResponding && secondaryDisplay->begin(SSD1306_SWITCHCAPVCC, SECONDARY_SCREEN_ADDRESS)) {
+        secondaryDisplayConnected = true;
+        setupSecondaryDisplay();
+        Serial.printf("Secondary display ready on SDA GPIO%d / SCL GPIO%d\n", I2C2_SDA_PIN, I2C2_SCL_PIN);
+    } else {
+        secondaryDisplayConnected = false;
+        Serial.println("Secondary display not found - continuing with primary display only");
+    }
+#endif
     
     return true;
 }
@@ -113,6 +134,18 @@ void Display::setupDisplay() {
     // Rotate display 180 degrees for inverted mounting
     display->setRotation(2);
     display->cp437(true); // Use full 256 char 'Code Page 437' font
+}
+
+void Display::setupSecondaryDisplay() {
+    if (!secondaryDisplayConnected || secondaryDisplay == nullptr) {
+        return;
+    }
+
+    secondaryDisplay->clearDisplay();
+    secondaryDisplay->setTextColor(SSD1306_WHITE);
+    secondaryDisplay->setRotation(2);
+    secondaryDisplay->cp437(true);
+    secondaryDisplay->display();
 }
 
 void Display::update() {
@@ -150,6 +183,8 @@ void Display::update() {
         float weight = scalePtr->getCurrentWeight();
         showWeightWithFlowAndTimer(weight);
     }
+
+    updateSecondaryDisplay();
 }
 
 void Display::showWeight(float weight) {
@@ -624,6 +659,11 @@ void Display::clear() {
     
     display->clearDisplay();
     display->display();
+
+    if (secondaryDisplayConnected && secondaryDisplay != nullptr) {
+        secondaryDisplay->clearDisplay();
+        secondaryDisplay->display();
+    }
 }
 
 void Display::setBrightness(uint8_t brightness) {
@@ -635,6 +675,11 @@ void Display::setBrightness(uint8_t brightness) {
     // SSD1306 doesn't have brightness control, but we can simulate with contrast
     display->ssd1306_command(SSD1306_SETCONTRAST);
     display->ssd1306_command(brightness);
+
+    if (secondaryDisplayConnected && secondaryDisplay != nullptr) {
+        secondaryDisplay->ssd1306_command(SSD1306_SETCONTRAST);
+        secondaryDisplay->ssd1306_command(brightness);
+    }
 }
 
 void Display::setBluetoothScale(BluetoothScale* bluetooth) {
@@ -855,121 +900,134 @@ void Display::showWeightWithFlowAndTimer(float weight) {
     display->setCursor(currentX, weightY + 3); // Positioned relative to weight baseline
     display->print(String(decimalPart));
     
-    // Right side: Timer and flow rate stacked (size 2)
-    display->setTextSize(2);
-    
-    // Get timer value and format without "s"
+    display->display();
+}
+
+void Display::updateSecondaryDisplay() {
+    if (!secondaryDisplayConnected || secondaryDisplay == nullptr) {
+        return;
+    }
+
     float currentTime = getTimerSeconds();
-    
-    // Get flow rate and format without "g/s"
     float currentFlowRate = 0.0;
     if (flowRatePtr != nullptr) {
         currentFlowRate = flowRatePtr->getFlowRate();
     }
-    
-    // Apply deadband to flow rate
+
     float displayFlowRate = currentFlowRate;
     if (currentFlowRate >= -0.1 && currentFlowRate <= 0.1) {
         displayFlowRate = 0.0;
     }
-    
-    // === CUSTOM TIMER RENDERING (like weight) ===
+
+    secondaryDisplay->clearDisplay();
+    secondaryDisplay->setTextColor(SSD1306_WHITE);
+
+    int16_t x1, y1;
+    uint16_t w, h;
+
     bool timerNegative = currentTime < 0;
     float absTimer = abs(currentTime);
     int timerInteger = (int)absTimer;
     int timerDecimal = (int)((absTimer - timerInteger) * 10 + 0.5);
-    
-    // Handle timer carry-over
     if (timerDecimal >= 10) {
         timerInteger += 1;
         timerDecimal = 0;
     }
-    
-    // Calculate timer position with "T" label at far right
-    display->setTextSize(2);
-    String timerIntStr = String(timerInteger);
-    if (timerNegative) timerIntStr = "-" + timerIntStr;
-    
-    uint16_t timerIntWidth, timerDecWidth, timerH, timerLabelWidth;
-    display->getTextBounds(timerIntStr, 0, 0, &x1, &y1, &timerIntWidth, &timerH);
-    display->setTextSize(1);
-    display->getTextBounds("T", 0, 0, &x1, &y1, &timerLabelWidth, &timerH);
-    display->getTextBounds(".", 0, 0, &x1, &y1, &w, &timerH);
-    uint16_t timerDotWidth = w;
-    display->getTextBounds(String(timerDecimal), 0, 0, &x1, &y1, &timerDecWidth, &timerH);
-    
-    // Position "T" at far right, numbers to the left
-    int timerLabelX = SCREEN_WIDTH - timerLabelWidth;
-    int timerStartX = timerLabelX - timerIntWidth - timerDotWidth - timerDecWidth;
-    
-    // Draw timer integer part (size 2)
-    display->setTextSize(2);
-    display->setCursor(timerStartX, 0);
-    display->print(timerIntStr);
-    
-    // Draw timer decimal point (size 1)
-    display->setTextSize(1);
-    display->setCursor(timerStartX + timerIntWidth, 7); // Aligned with size 2 baseline
-    display->print(".");
-    
-    // Draw timer decimal digit (size 1)
-    display->setCursor(timerStartX + timerIntWidth + timerDotWidth, 7);
-    display->print(String(timerDecimal));
-    
-    // Draw "T" label at far right (size 1)
-    display->setTextSize(1);
-    display->setCursor(timerLabelX, 0); // Far right position
-    display->print("T");
-    
-    // === CUSTOM FLOW RATE RENDERING (like weight) ===
+
     bool flowNegative = displayFlowRate < 0;
     float absFlow = abs(displayFlowRate);
     int flowInteger = (int)absFlow;
     int flowDecimal = (int)((absFlow - flowInteger) * 10 + 0.5);
-    
-    // Handle flow rate carry-over
     if (flowDecimal >= 10) {
         flowInteger += 1;
         flowDecimal = 0;
     }
-    
-    // Calculate flow rate position with "F" label at far right
-    display->setTextSize(2);
+
+    String timerIntStr = String(timerInteger);
+    if (timerNegative) {
+        timerIntStr = "-" + timerIntStr;
+    }
+
     String flowIntStr = String(flowInteger);
-    if (flowNegative) flowIntStr = "-" + flowIntStr;
-    
-    uint16_t flowIntWidth, flowDecWidth, flowH, flowLabelWidth;
-    display->getTextBounds(flowIntStr, 0, 0, &x1, &y1, &flowIntWidth, &flowH);
-    display->setTextSize(1);
-    display->getTextBounds("F", 0, 0, &x1, &y1, &flowLabelWidth, &flowH);
-    display->getTextBounds(".", 0, 0, &x1, &y1, &w, &flowH);
-    uint16_t flowDotWidth = w;
-    display->getTextBounds(String(flowDecimal), 0, 0, &x1, &y1, &flowDecWidth, &flowH);
-    
-    // Position "F" at far right, numbers to the left
-    int flowLabelX = SCREEN_WIDTH - flowLabelWidth;
-    int flowStartX = flowLabelX - flowIntWidth - flowDotWidth - flowDecWidth;
-    
-    // Draw flow rate integer part (size 2)
-    display->setTextSize(2);
-    display->setCursor(flowStartX, 16); // Below timer
-    display->print(flowIntStr);
-    
-    // Draw flow rate decimal point (size 1)
-    display->setTextSize(1);
-    display->setCursor(flowStartX + flowIntWidth, 23); // Aligned with size 2 baseline
-    display->print(".");
-    
-    // Draw flow rate decimal digit (size 1)
-    display->setCursor(flowStartX + flowIntWidth + flowDotWidth, 23);
-    display->print(String(flowDecimal));
-    
-    // Draw "F" label at far right (size 1)
-    display->setTextSize(1);
-    display->setCursor(flowLabelX, 16); // Far right position, below timer
-    display->print("F");
-    
-    display->display();
+    if (flowNegative) {
+        flowIntStr = "-" + flowIntStr;
+    }
+
+    int timerX = 0;
+    int timerY = 5;
+    if (absTimer >= 60.0f) {
+        int totalSeconds = (int)absTimer;
+        int minutes = totalSeconds / 60;
+        int seconds = totalSeconds % 60;
+
+        String minuteStr = String(minutes);
+        if (timerNegative) {
+            minuteStr = "-" + minuteStr;
+        }
+
+        String secondStr = (seconds < 10) ? ("0" + String(seconds)) : String(seconds);
+
+        uint16_t minuteWidth, colonWidth, secondWidth;
+        secondaryDisplay->setTextSize(3);
+        secondaryDisplay->getTextBounds(minuteStr, 0, 0, &x1, &y1, &minuteWidth, &h);
+        secondaryDisplay->getTextBounds(":", 0, 0, &x1, &y1, &colonWidth, &h);
+        secondaryDisplay->getTextBounds(secondStr, 0, 0, &x1, &y1, &secondWidth, &h);
+
+        secondaryDisplay->setCursor(timerX, timerY);
+        secondaryDisplay->print(minuteStr);
+
+        // Reduce whitespace around ':' (GFX adds full char-cell padding)
+        int colonGap = 5;
+        timerX += minuteWidth - colonGap;
+        secondaryDisplay->setCursor(timerX, timerY);
+        secondaryDisplay->print(":");
+
+        timerX += colonWidth - colonGap;
+        secondaryDisplay->setCursor(timerX, timerY);
+        secondaryDisplay->print(secondStr);
+    } else {
+        secondaryDisplay->setTextSize(3);
+        secondaryDisplay->setCursor(timerX, timerY);
+        secondaryDisplay->print(timerIntStr);
+        secondaryDisplay->getTextBounds(timerIntStr, 0, 0, &x1, &y1, &w, &h);
+        timerX += w;
+        secondaryDisplay->setTextSize(1);
+        secondaryDisplay->setCursor(timerX, timerY + 11);
+        secondaryDisplay->print(".");
+        secondaryDisplay->getTextBounds(".", 0, 0, &x1, &y1, &w, &h);
+        timerX += w;
+        secondaryDisplay->setTextSize(2);
+        secondaryDisplay->setCursor(timerX, timerY + 3);
+        secondaryDisplay->print(String(timerDecimal));
+    }
+
+    int flowY = 5;
+    uint16_t flowIntWidth, dotWidth, flowDecWidth;
+    secondaryDisplay->setTextSize(3);
+    secondaryDisplay->getTextBounds(flowIntStr, 0, 0, &x1, &y1, &flowIntWidth, &h);
+    secondaryDisplay->setTextSize(1);
+    secondaryDisplay->getTextBounds(".", 0, 0, &x1, &y1, &dotWidth, &h);
+    secondaryDisplay->setTextSize(2);
+    secondaryDisplay->getTextBounds(String(flowDecimal), 0, 0, &x1, &y1, &flowDecWidth, &h);
+
+    // Right-align complete flow value block to the display edge
+    int flowX = SCREEN_WIDTH - (flowIntWidth + dotWidth + flowDecWidth);
+
+    secondaryDisplay->setTextSize(3);
+    secondaryDisplay->setCursor(flowX, flowY);
+    secondaryDisplay->print(flowIntStr);
+    flowX += flowIntWidth;
+
+    secondaryDisplay->setTextSize(1);
+    secondaryDisplay->setCursor(flowX, flowY + 11);
+    secondaryDisplay->print(".");
+    flowX += dotWidth;
+
+    secondaryDisplay->setTextSize(2);
+    secondaryDisplay->setCursor(flowX, flowY + 3);
+    secondaryDisplay->print(String(flowDecimal));
+
+    secondaryDisplay->display();
 }
 
 // Timer management methods

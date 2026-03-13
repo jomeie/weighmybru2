@@ -40,6 +40,8 @@
   #define BATTERY_PIN         7   // GPIO7 - Battery voltage monitoring (ADC1_CH6)
   #define I2C_SDA_PIN         8   // GPIO8 - I2C Data pin for display
   #define I2C_SCL_PIN         9   // GPIO9 - I2C Clock pin for display
+  #define I2C2_SDA_PIN        2   // GPIO2 - I2C Data pin for second display (separate bus)
+  #define I2C2_SCL_PIN        1   // GPIO1 - I2C Clock pin for second display (separate bus)
 #endif
 
 // Board-specific configurations

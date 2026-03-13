@@ -63,13 +63,17 @@ private:
     PowerManager* powerManagerPtr;
     BatteryMonitor* batteryPtr;
     class WiFiManager* wifiManagerPtr;
+    TwoWire secondaryWire;
     Adafruit_SSD1306* display;
+    Adafruit_SSD1306* secondaryDisplay;
     bool displayConnected; // Track if display is actually connected
+    bool secondaryDisplayConnected; // Optional second display on separate bus
     
     static const uint8_t SCREEN_WIDTH = 128;
     static const uint8_t SCREEN_HEIGHT = 32;
     static const uint8_t OLED_RESET = -1; // Reset pin not used
     static const uint8_t SCREEN_ADDRESS = 0x3C; // Common I2C address for SSD1306
+    static const uint8_t SECONDARY_SCREEN_ADDRESS = 0x3C; // Same address allowed on separate I2C bus
     
     unsigned long messageStartTime;
     int messageDuration; // Store the duration for each message
@@ -91,6 +95,8 @@ private:
     void drawWeight(float weight);
     void showWeightWithFlowAndTimer(float weight); // Main display showing weight, flow rate, and timer
     void setupDisplay();
+    void setupSecondaryDisplay();
+    void updateSecondaryDisplay();
     void drawBluetoothStatus(); // Draw Bluetooth connection status icon
     void drawBatteryStatus(); // Draw battery status with 3-segment indicator
 };
