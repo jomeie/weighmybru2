@@ -1,0 +1,126 @@
+name: Sync Branch from Another Fork
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: 'Upstream repository to sync from (e.g. 031devstudios/weighmybru2)'
+        required: true
+        default: '031devstudios/weighmybru2'
+        type: string
+      upstream_branch:
+        description: 'Branch name in the upstream repository to fetch'
+        required: true
+        default: 'master'
+        type: string
+      target_branch:
+        description: 'Target branch name in this fork (leave empty to use the same name as upstream_branch)'
+        required: false
+        default: ''
+        type: string
+      strategy:
+        description: 'Merge strategy: merge (preserves history) or rebase (linear history)'
+        required: true
+        default: 'merge'
+        type: choice
+        options:
+          - merge
+          - rebase
+
+  schedule:
+    # Automatically sync master branch from upstream every day at 06:00 UTC
+    - cron: '0 6 * * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine parameters
+        id: params
+        run: |
+          # Use inputs for manual trigger, defaults for scheduled runs
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            UPSTREAM_REPO="031devstudios/weighmybru2"
+            UPSTREAM_BRANCH="master"
+            TARGET_BRANCH="master"
+            STRATEGY="merge"
+          else
+            UPSTREAM_REPO="${{ github.event.inputs.upstream_repo }}"
+            UPSTREAM_BRANCH="${{ github.event.inputs.upstream_branch }}"
+            TARGET_BRANCH="${{ github.event.inputs.target_branch }}"
+            STRATEGY="${{ github.event.inputs.strategy }}"
+          fi
+
+          # Use upstream branch name if no target branch was specified
+          if [[ -z "$TARGET_BRANCH" ]]; then
+            TARGET_BRANCH="$UPSTREAM_BRANCH"
+          fi
+
+          echo "UPSTREAM_REPO=$UPSTREAM_REPO"     >> $GITHUB_OUTPUT
+          echo "UPSTREAM_BRANCH=$UPSTREAM_BRANCH" >> $GITHUB_OUTPUT
+          echo "TARGET_BRANCH=$TARGET_BRANCH"     >> $GITHUB_OUTPUT
+          echo "STRATEGY=$STRATEGY"               >> $GITHUB_OUTPUT
+
+          echo "Upstream:  https://github.com/$UPSTREAM_REPO  branch: $UPSTREAM_BRANCH"
+          echo "Target:    $TARGET_BRANCH  (strategy: $STRATEGY)"
+
+      - name: Validate and add upstream remote
+        run: |
+          UPSTREAM_REPO="${{ steps.params.outputs.UPSTREAM_REPO }}"
+
+          # Validate that the upstream repo follows the expected owner/repo format
+          if [[ ! "$UPSTREAM_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "❌ Invalid upstream_repo format: '$UPSTREAM_REPO'. Expected 'owner/repo'."
+            exit 1
+          fi
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream "${{ steps.params.outputs.UPSTREAM_BRANCH }}"
+
+      - name: Sync branch (merge)
+        if: steps.params.outputs.STRATEGY == 'merge'
+        run: |
+          TARGET="${{ steps.params.outputs.TARGET_BRANCH }}"
+          UPSTREAM_BRANCH="${{ steps.params.outputs.UPSTREAM_BRANCH }}"
+
+          # Check out the target branch, creating it if it doesn't exist yet
+          if git ls-remote --exit-code --heads origin "$TARGET" > /dev/null 2>&1; then
+            git checkout "$TARGET"
+            git merge "upstream/$UPSTREAM_BRANCH" --no-edit \
+              -m "chore: sync \"$UPSTREAM_BRANCH\" from ${{ steps.params.outputs.UPSTREAM_REPO }}"
+          else
+            git checkout -b "$TARGET" "upstream/$UPSTREAM_BRANCH"
+          fi
+
+          git push origin "$TARGET"
+          echo "✅ Branch '$TARGET' synced successfully via merge."
+
+      - name: Sync branch (rebase)
+        if: steps.params.outputs.STRATEGY == 'rebase'
+        run: |
+          TARGET="${{ steps.params.outputs.TARGET_BRANCH }}"
+          UPSTREAM_BRANCH="${{ steps.params.outputs.UPSTREAM_BRANCH }}"
+
+          if git ls-remote --exit-code --heads origin "$TARGET" > /dev/null 2>&1; then
+            git checkout "$TARGET"
+            git rebase "upstream/$UPSTREAM_BRANCH"
+          else
+            git checkout -b "$TARGET" "upstream/$UPSTREAM_BRANCH"
+          fi
+
+          git push --force-with-lease origin "$TARGET"
+          echo "✅ Branch '$TARGET' synced successfully via rebase."
