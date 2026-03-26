@@ -653,6 +653,10 @@ void Display::showIPAddresses() {
 
 void Display::setPowerSave(bool enable) {
     display->ssd1306_command(enable ? 0xae : 0xaf);
+    
+    if (secondaryDisplayConnected && secondaryDisplay != nullptr) {
+        secondaryDisplay->ssd1306_command(enable ? 0xae : 0xaf);
+    }
 }
 
 void Display::clear() {
